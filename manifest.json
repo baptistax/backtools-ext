@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "BackTools Export",
+  "description": "Code-rich bounded DevTools capture export toolkit.",
+  "version": "1.0.0",
+  "devtools_page": "devtools.html",
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": [
+    "storage"
+  ],
+  "host_permissions": [
+    "<all_urls>"
+  ]
+}

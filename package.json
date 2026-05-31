@@ -1,0 +1,28 @@
+{
+  "name": "backtools-ext",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "check": "node --check src/runtime/backToolsController.js && node --check src/runtime/backToolsRuntimeAdapter.js && node --check src/runtime/runtimeSnapshot.js && node --check src/runtime/reloadAndCapture.js && node --check src/ui/export/view.js && node --check src/ui/export/storage.js && node --check src/export/captureZipWriter.js && node --check src/export/manifestBuilder.js && node --check src/export/reportBuilder.js && node --check src/export/zipWriterAdapter.js && node --check devtools.js && node --check panel.js",
+    "test": "npm run check"
+  },
+  "description": "Chrome DevTools extension for bounded code-rich export captures.",
+  "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/baptistax/backtools-ext.git"
+  },
+  "bugs": {
+    "url": "https://github.com/baptistax/backtools-ext/issues"
+  },
+  "homepage": "https://github.com/baptistax/backtools-ext#readme",
+  "keywords": [
+    "chrome-extension",
+    "devtools",
+    "export",
+    "capture",
+    "network",
+    "sources"
+  ]
+}
