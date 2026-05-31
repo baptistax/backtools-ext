@@ -36,16 +36,131 @@
     return false;
   }
 
+  function estimateSerializedBytes(value) {
+    const text = typeof value === 'string' ? value : JSON.stringify(value, null, 2);
+    if (typeof TextEncoder === 'function') {
+      return new TextEncoder().encode(text).length;
+    }
+    if (typeof Buffer !== 'undefined') {
+      return Buffer.byteLength(text, 'utf8');
+    }
+    return text.length;
+  }
+
+  function replaceOversizedEntries(payload, maxBytes, notice) {
+    if (!payload || !Array.isArray(payload.entries) || !maxBytes || maxBytes <= 0) {
+      return payload;
+    }
+    const basePayload = {
+      ...payload,
+      entries: [],
+      entriesIncluded: 0,
+      entriesTruncated: Array.isArray(payload.entries) && payload.entries.length > 0,
+      truncation: notice
+    };
+    if (estimateSerializedBytes(basePayload) > maxBytes) {
+      return basePayload;
+    }
+    let low = 0;
+    let high = payload.entries.length;
+    while (low < high) {
+      const mid = Math.ceil((low + high) / 2);
+      const candidate = {
+        ...basePayload,
+        entries: payload.entries.slice(0, mid),
+        entriesIncluded: mid,
+        entriesTruncated: mid < payload.entries.length
+      };
+      if (estimateSerializedBytes(candidate) <= maxBytes) {
+        low = mid;
+      } else {
+        high = mid - 1;
+      }
+    }
+    return {
+      ...basePayload,
+      entries: payload.entries.slice(0, low),
+      entriesIncluded: low,
+      entriesTruncated: low < payload.entries.length
+    };
+  }
+
+  function enforceJsonArtifactBudget(payload, { filePath, maxBytes, log, fallbackMode = 'truncate_entries' }) {
+    if (!payload || !maxBytes || maxBytes <= 0) {
+      return payload;
+    }
+    const currentBytes = estimateSerializedBytes(payload);
+    if (currentBytes <= maxBytes) {
+      return payload;
+    }
+    const notice = {
+      warning: 'artifact_budget_exceeded',
+      filePath,
+      originalBytes: currentBytes,
+      maxBytes
+    };
+    if (fallbackMode === 'truncate_entries' && Array.isArray(payload.entries)) {
+      const truncated = replaceOversizedEntries(payload, maxBytes, notice);
+      const nextBytes = estimateSerializedBytes(truncated);
+      if (nextBytes <= maxBytes) {
+        try {
+          log('WARN', 'Artifact truncated to fit budget', `${filePath} ${currentBytes} -> ${nextBytes} bytes`);
+        } catch {}
+        return truncated;
+      }
+    }
+    const fallback = {
+      schemaVersion: payload.schemaVersion || 'backtools.artifact.notice.v1',
+      reportProfile: payload.reportProfile || 'compact_notice',
+      generatedAt: payload.generatedAt || new Date().toISOString(),
+      inspectedUrl: payload.inspectedUrl || null,
+      truncated: true,
+      truncation: notice,
+      message: `Artifact exceeded configured size budget and was compacted: ${filePath}`,
+      summary: payload.totals || payload.summary || null
+    };
+    try {
+      log('WARN', 'Artifact replaced with compact notice', `${filePath} ${currentBytes} -> ${estimateSerializedBytes(fallback)} bytes`);
+    } catch {}
+    return fallback;
+  }
+
+  function warnIfArtifactExceedsBytes(payload, { filePath, maxBytes, log }) {
+    if (!payload || !maxBytes || maxBytes <= 0) {
+      return;
+    }
+    const bytes = estimateSerializedBytes(payload);
+    if (bytes > maxBytes) {
+      try {
+        log('WARN', 'Artifact exceeds recommended size', `${filePath} ${bytes} bytes > ${maxBytes} bytes`);
+      } catch {}
+    }
+  }
+
+
   async function writeCurrentCaptureZip({ plan, state, log, ZipCtor, onProgress }) {
     const zip = new exportApi.ZipWriterAdapter(ZipCtor ? { JSZip: ZipCtor } : {});
     const written = [];
     const includeHumanSummary = state?.export?.options?.includeHumanSummary !== false;
     const includeNetworkReport = !!(state?.export?.options?.includeNetwork && state?.export?.options?.includeNetworkSummary !== false);
     const includeManifestDetails = state?.export?.options?.includeManifestDetails !== false;
+    const budgets = plan?.budgets || {};
+    const rawCookieScope = domain.summarizeRawCookieScope
+      ? domain.summarizeRawCookieScope(state.cookies.observedCookies || [])
+      : { rawCookieCount: 0, domains: [] };
+    const includeRawCookieExport = isRawCookieExportEnabled(state)
+      && rawCookieScope.rawCookieCount > 0;
+    const rawApplicationScope = domain.summarizeRawApplicationScope
+      ? domain.summarizeRawApplicationScope(state.application || {})
+      : { rawStorageItemCount: 0, origins: [], storageTypes: [] };
+    const includeRawApplicationExport = isRawApplicationExportEnabled(state)
+      && rawApplicationScope.rawStorageItemCount > 0;
     const totalPlannedWrites = (plan?.plannedFiles?.length || 0)
       + (state?.export?.options?.includeCookiesReport ? (state?.export?.options?.includeCookieHtmlReport ? 4 : 3) : 0)
+      + (includeRawCookieExport ? 2 : 0)
       + (includeNetworkReport ? 2 : 0)
       + (state?.export?.options?.includeApplication ? 4 : 0)
+      + (includeRawApplicationExport ? 1 : 0)
       + 1
       + (includeManifestDetails ? 1 : 0)
       + (includeHumanSummary ? 1 : 0)
@@ -134,9 +249,6 @@
     const targetMetadata = state.target?.analyzed || state.target?.current || null;
     const moduleStatuses = state.target?.moduleStatuses || {};
     const includeApplicationReport = !!state.export.options.includeApplication;
-    const rawCookieScope = domain.summarizeRawCookieScope
-      ? domain.summarizeRawCookieScope(state.cookies.observedCookies || [])
-      : { rawCookieCount: 0, domains: [] };
     const objectDumpEnabled = state.dumpObjectsEnabled === true;
     const objectDumpMetadata = {
       dumpObjectsEnabled: objectDumpEnabled,
@@ -147,21 +259,11 @@
       applicationItemsTotal: state.application.summary?.storageItems || 0,
       applicationRawVisible: 0
     };
-    const includeRawCookieExport = isRawCookieExportEnabled(state)
-      && rawCookieScope.rawCookieCount > 0;
-    const rawApplicationScope = domain.summarizeRawApplicationScope
-      ? domain.summarizeRawApplicationScope(state.application || {})
-      : { rawStorageItemCount: 0, origins: [], storageTypes: [] };
     objectDumpMetadata.applicationRawVisible = isRawApplicationExportEnabled(state) ? rawApplicationScope.rawStorageItemCount : 0;
-    const includeRawApplicationExport = isRawApplicationExportEnabled(state)
-      && rawApplicationScope.rawStorageItemCount > 0;
     const writtenNetworkBodyById = indexWrittenNetworkBodies(written);
     const networkEntriesForReport = (state.network.entries || []).map(row => {
       const bodyFile = writtenNetworkBodyById.get(row.id);
-      return {
-        ...row,
-        zipPath: bodyFile?.zipPath || null
-      };
+      return compactNetworkEntryForReports(row, bodyFile?.zipPath || null);
     });
     const networkReportInput = {
       generatedAt,
@@ -170,10 +272,20 @@
       entries: networkEntriesForReport
     };
     const networkReport = includeNetworkReport
-      ? exportApi.buildCurrentNetworkReport(networkReportInput)
+      ? enforceJsonArtifactBudget(exportApi.buildCurrentNetworkReport(networkReportInput), {
+          filePath: 'NETWORK_REPORT.json',
+          maxBytes: budgets.maxNetworkReportBytes,
+          log,
+          fallbackMode: 'truncate_entries'
+        })
       : null;
     const networkDetailsReport = includeNetworkReport && exportApi.buildCurrentNetworkDetailsReport
-      ? exportApi.buildCurrentNetworkDetailsReport(networkReportInput)
+      ? enforceJsonArtifactBudget(exportApi.buildCurrentNetworkDetailsReport(networkReportInput), {
+          filePath: 'network/NETWORK_DETAILS.json',
+          maxBytes: budgets.maxNetworkReportBytes,
+          log,
+          fallbackMode: 'truncate_entries'
+        })
       : null;
     const cookieReportInput = {
       generatedAt,
@@ -190,7 +302,12 @@
       }
     };
     const cookiesReport = state.export.options.includeCookiesReport
-      ? exportApi.buildCurrentCookiesReport(cookieReportInput)
+      ? enforceJsonArtifactBudget(exportApi.buildCurrentCookiesReport(cookieReportInput), {
+          filePath: 'cookies/COOKIES_REPORT.json',
+          maxBytes: budgets.maxCookieReportBytes,
+          log,
+          fallbackMode: 'truncate_entries'
+        })
       : null;
     const cookiesSanitizedJson = state.export.options.includeCookiesReport
       ? exportApi.buildCurrentCookiesSanitizedJson(cookieReportInput)
@@ -207,7 +324,12 @@
       }
     };
     const applicationReport = includeApplicationReport
-      ? exportApi.buildCurrentApplicationReport(applicationReportInput)
+      ? enforceJsonArtifactBudget(exportApi.buildCurrentApplicationReport(applicationReportInput), {
+          filePath: 'application/APPLICATION_REPORT.json',
+          maxBytes: budgets.maxApplicationReportBytes,
+          log,
+          fallbackMode: 'truncate_entries'
+        })
       : null;
     const applicationStorageSanitizedJson = includeApplicationReport
       ? exportApi.buildCurrentApplicationStorageSanitizedJson(applicationReportInput)
@@ -388,6 +510,39 @@
       }
     }
     return byId;
+  }
+
+  function compactNetworkEntryForReports(row, zipPath) {
+    return {
+      id: row?.id,
+      url: row?.url || '',
+      urlRedacted: row?.urlRedacted || row?.url || '',
+      urlHash: row?.urlHash || null,
+      method: row?.method || null,
+      statusCode: row?.statusCode ?? row?.status ?? null,
+      mimeType: row?.mimeType || row?.bodyMimeType || null,
+      type: row?.type || null,
+      host: row?.host || null,
+      startedDateTime: row?.startedDateTime || null,
+      size: row?.size ?? null,
+      bodySize: row?.bodySize ?? null,
+      bodyCaptureStatus: row?.bodyCaptureStatus || row?.status || 'metadata_only',
+      bodyCaptureReason: row?.bodyCaptureReason || row?.reason || null,
+      bodyCapturedBytes: row?.bodyCapturedBytes || 0,
+      bodySizeBytes: row?.bodySizeBytes ?? row?.bodyCapturedBytes ?? 0,
+      bodyEncoding: row?.bodyEncoding || row?.encoding || null,
+      bodyRenderStatus: row?.bodyRenderStatus || null,
+      bodyExportStatus: row?.bodyExportStatus || null,
+      bodyRedactionApplied: !!row?.bodyRedactionApplied,
+      requestHeadersRedacted: row?.requestHeadersRedacted || undefined,
+      responseHeadersRedacted: row?.responseHeadersRedacted || undefined,
+      resourceCategory: row?.resourceCategory || null,
+      visibleByDefault: row?.visibleByDefault !== false,
+      hiddenByDefaultReason: row?.hiddenByDefaultReason || null,
+      redactionApplied: !!row?.redactionApplied,
+      redactedFields: row?.redactedFields || [],
+      zipPath: zipPath || null
+    };
   }
 
   return { writeCurrentCaptureZip };

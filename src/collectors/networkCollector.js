@@ -83,6 +83,7 @@
     const rowIndexByKey = new Map();
     let sequence = 0;
     let totalCapturedBodyBytes = 0;
+    const capturedBodyBytesByKey = new Map();
     let stopListener = null;
     let stopped = false;
     let processingQueue = Promise.resolve();
@@ -163,7 +164,7 @@
         if (inlineContent.hasContent) {
           updated = applyCapturedContent(row, inlineContent.content, inlineContent.encoding, policy, totalCapturedBodyBytes);
           if (updated.bodyCaptureStatus === BodyCaptureStatus.BODY_CAPTURED) {
-            totalCapturedBodyBytes += updated.bodyCapturedBytes || 0;
+            totalCapturedBodyBytes = reconcileCapturedBodyBytes(totalCapturedBodyBytes, capturedBodyBytesByKey, row.dedupeKey, updated.bodyCapturedBytes || 0);
           }
           return upsert(updated);
         }
@@ -181,7 +182,7 @@
 
         updated = applyCapturedContent(row, contentResult.content, contentResult.encoding, policy, totalCapturedBodyBytes);
         if (updated.bodyCaptureStatus === BodyCaptureStatus.BODY_CAPTURED) {
-          totalCapturedBodyBytes += updated.bodyCapturedBytes || 0;
+          totalCapturedBodyBytes = reconcileCapturedBodyBytes(totalCapturedBodyBytes, capturedBodyBytesByKey, row.dedupeKey, updated.bodyCapturedBytes || 0);
         }
         return upsert(updated);
       } catch (error) {
@@ -241,6 +242,13 @@
         allowedMimeTypes: new Set(policy.allowedMimeTypes)
       })
     };
+  }
+
+  function reconcileCapturedBodyBytes(totalCapturedBodyBytes, capturedBodyBytesByKey, dedupeKey, nextBytes) {
+    const previousBytes = capturedBodyBytesByKey.get(dedupeKey) || 0;
+    const nextTotal = Math.max(0, totalCapturedBodyBytes - previousBytes + (Number(nextBytes) || 0));
+    capturedBodyBytesByKey.set(dedupeKey, Number(nextBytes) || 0);
+    return nextTotal;
   }
 
   function buildNetworkStatus(target, rows, harUnavailable, harUnavailableReason) {

@@ -3,7 +3,9 @@
   root.BackToolsCollectors = Object.assign(root.BackToolsCollectors || {}, api);
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof globalThis !== 'undefined' ? globalThis : window, function(root) {
-  const SOURCE_CONTENT_CONCURRENCY = 6;
+  const SOURCE_CONTENT_CONCURRENCY = 1;
+  const MAX_SINGLE_SOURCE_BYTES = 2 * 1024 * 1024;
+  const MAX_TOTAL_SOURCE_BYTES = 20 * 1024 * 1024;
 
   let domain = root.BackToolsDomain || {};
   if (typeof require === 'function') {
@@ -24,6 +26,7 @@
     const target = options.target || safeClassifyTarget(targetUrl);
     const out = [];
     let resources = [];
+    let totalCapturedBytes = 0;
     try {
       resources = typeof adapters.getResources === 'function' ? await adapters.getResources() : [];
     } catch {
@@ -36,12 +39,16 @@
       });
     }
     await mapWithConcurrency(Array.isArray(resources) ? resources : [], SOURCE_CONTENT_CONCURRENCY, async (res, index) => {
-      out[index] = await collectSourceResource(adapters, targetUrl, res, index);
+      const row = await collectSourceResource(adapters, targetUrl, res, index, {
+        remainingBytes: Math.max(0, MAX_TOTAL_SOURCE_BYTES - totalCapturedBytes)
+      });
+      out[index] = row;
+      totalCapturedBytes += Number(row?.size) || 0;
     });
     return attachModuleStatus(out, buildSourcesStatus(target, out));
   }
 
-  async function collectSourceResource(adapters, targetUrl, res, index) {
+  async function collectSourceResource(adapters, targetUrl, res, index, budget = {}) {
     const p = domain.parseUrl(res.url || '');
     const urlRedaction = domain.redactUrlWithMetadata(res.url || '');
     let row = {
@@ -65,6 +72,18 @@
     };
     row = domain.classifyResourceRecord(row, targetUrl);
 
+    if (shouldSkipSourceContent(row)) {
+      row.status = 'metadata_only';
+      row.reason = 'STATIC_ASSET_DISABLED_BY_DEFAULT';
+      return row;
+    }
+
+    if ((Number(budget.remainingBytes) || 0) <= 0) {
+      row.status = 'metadata_only';
+      row.reason = 'EXPORT_TOTAL_SIZE_LIMIT_EXCEEDED';
+      return row;
+    }
+
     let rc = null;
     try {
       rc = typeof adapters.getResourceContent === 'function'
@@ -78,17 +97,39 @@
       row.status = 'unavailable';
       row.reason = 'GET_CONTENT_FAILED';
     } else if (typeof rc?.content === 'string' && rc.content.length) {
-      row.content = rc.content;
-      row.encoding = rc.encoding || null;
-      row.size = rc.encoding === 'base64'
+      const size = rc.encoding === 'base64'
         ? Math.floor(rc.content.length * 0.75)
         : new TextEncoder().encode(rc.content).length;
+      if (size > MAX_SINGLE_SOURCE_BYTES) {
+        row.status = 'metadata_only';
+        row.reason = 'SIZE_LIMIT_EXCEEDED';
+        row.size = size;
+        return row;
+      }
+      if (size > (Number(budget.remainingBytes) || 0)) {
+        row.status = 'metadata_only';
+        row.reason = 'EXPORT_TOTAL_SIZE_LIMIT_EXCEEDED';
+        row.size = size;
+        return row;
+      }
+      row.content = rc.content;
+      row.encoding = rc.encoding || null;
+      row.size = size;
       row.status = 'readable';
       row.exportable = true;
       row.reason = null;
     }
 
     return row;
+  }
+
+  function shouldSkipSourceContent(row = {}) {
+    const type = String(row.type || '').toLowerCase();
+    return type === 'image'
+      || type === 'font'
+      || type === 'media'
+      || type === 'video'
+      || type === 'audio';
   }
 
   async function mapWithConcurrency(items, limit, iteratee) {

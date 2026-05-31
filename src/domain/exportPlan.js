@@ -19,12 +19,12 @@
   const DEFAULT_EXPORT_BUDGETS = {
     maxObservedItemsForUiRender: 2000,
     maxExportedFiles: 1100,
-    maxTotalZipInputBytes: 110 * 1024 * 1024,
+    maxTotalZipInputBytes: 40 * 1024 * 1024,
 
     maxSourceCodeFiles: 500,
     maxNetworkCodeBodyFiles: 500,
-    maxTotalSourceCodeBytes: 50 * 1024 * 1024,
-    maxTotalNetworkCodeBytes: 50 * 1024 * 1024,
+    maxTotalSourceCodeBytes: 20 * 1024 * 1024,
+    maxTotalNetworkCodeBytes: 20 * 1024 * 1024,
 
     maxStaticAssetFiles: 50,
     maxTotalStaticAssetBytes: 10 * 1024 * 1024,

@@ -115,20 +115,20 @@
     switch (input.kind) {
       case 'text':
         if (typeof input.data !== 'string') throw new Error('Invalid ZIP text input: expected a string');
-        return input.data;
+        return { data: input.data, options: {} };
       case 'json':
-        return JSON.stringify(input.data, null, 2);
+        return { data: JSON.stringify(input.data, null, 2), options: {} };
       case 'bytes':
         if (!isUint8Array(input.data)) throw new Error('Invalid ZIP bytes input: expected Uint8Array');
-        return input.data;
+        return { data: input.data, options: {} };
       case 'arrayBuffer':
         if (!isArrayBuffer(input.data)) throw new Error('Invalid ZIP arrayBuffer input: expected ArrayBuffer');
-        return new Uint8Array(input.data);
+        return { data: input.data, options: {} };
       case 'blob':
         if (!isBlobLike(input.data)) throw new Error('Invalid ZIP blob input: expected Blob');
-        return new Uint8Array(await input.data.arrayBuffer());
+        return { data: input.data, options: {} };
       case 'base64':
-        return decodeBase64ToBytes(input.data);
+        return { data: normalizeBase64(input.data), options: { base64: true } };
       default:
         throw new Error(`Unsupported ZIP input kind: ${input.kind}`);
     }
@@ -168,8 +168,11 @@
      */
     async add(path, input, options = {}) {
       if (typeof path !== 'string' || !path) throw new Error('Invalid ZIP path: expected a non-empty string');
-      const data = await normalizeInput(input);
-      this.zip.file(path, data, normalizeEntryOptions(options));
+      const normalized = await normalizeInput(input);
+      this.zip.file(path, normalized.data, {
+        ...normalizeEntryOptions(options),
+        ...(normalized.options || {})
+      });
     }
 
     /**
@@ -177,8 +180,7 @@
      */
     async generateBlob() {
       if (typeof Blob === 'undefined') throw new Error('Blob is required to generate a ZIP blob');
-      const bytes = await this.zip.generateAsync({ type: 'uint8array' });
-      return new Blob([bytes], { type: 'application/zip' });
+      return this.zip.generateAsync({ type: 'blob' });
     }
 
     get raw() {

@@ -19,6 +19,8 @@
   };
 
   const NETWORK_REPORT_LIMITS = {
+    maxCompactEntries: 500,
+    maxDetailsEntries: 2000,
     maxExampleEntriesPerReason: 10,
     maxTopHosts: 20,
     maxTopMimeTypes: 20
@@ -147,6 +149,7 @@
 
   function buildCurrentNetworkReport({ generatedAt, analyzedUrl, policy, entries }) {
     const rows = entries || [];
+    const limitedRows = rows.slice(0, NETWORK_REPORT_LIMITS.maxCompactEntries);
     return {
       schemaVersion: 'backtools.network.report.v1',
       reportProfile: 'compact_human_readable',
@@ -158,12 +161,16 @@
       totals: summarizeNetworkRows(rows),
       highlights: buildNetworkHighlights(rows),
       reasonGroups: buildNetworkReasonGroups(rows),
-      entries: rows.map(compactNetworkEntry)
+      entriesTotal: rows.length,
+      entriesIncluded: limitedRows.length,
+      entriesTruncated: rows.length > limitedRows.length,
+      entries: limitedRows.map(compactNetworkEntry)
     };
   }
 
   function buildCurrentNetworkDetailsReport({ generatedAt, analyzedUrl, policy, entries }) {
     const rows = entries || [];
+    const limitedRows = rows.slice(0, NETWORK_REPORT_LIMITS.maxDetailsEntries);
     return {
       schemaVersion: 'backtools.network.details.v1',
       reportProfile: 'redacted_machine_details',
@@ -172,7 +179,10 @@
       message: 'Verbose redacted network details. This file is intended for tooling/debugging, not first-pass reading.',
       policy: sanitizeNetworkPolicy(policy),
       totals: summarizeNetworkRows(rows),
-      entries: rows.map(redactNetworkEntry)
+      entriesTotal: rows.length,
+      entriesIncluded: limitedRows.length,
+      entriesTruncated: rows.length > limitedRows.length,
+      entries: limitedRows.map(redactNetworkEntry)
     };
   }
 

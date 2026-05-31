@@ -139,6 +139,75 @@
     };
   }
 
+
+  function summarizeRowsForCache(rows = []) {
+    let totalSize = 0;
+    let totalCapturedBytes = 0;
+    let visible = 0;
+    let metadataOnly = 0;
+    let failed = 0;
+    const head = [];
+    const tail = [];
+    for (let index = 0; index < rows.length; index++) {
+      const row = rows[index] || {};
+      totalSize += Number(row.size || 0);
+      totalCapturedBytes += Number(row.bodyCapturedBytes || 0);
+      if (row.visibleByDefault !== false) visible++;
+      if ((row.bodyCaptureStatus || row.status) === "metadata_only") metadataOnly++;
+      if ((row.status || "").includes("failed") || (row.bodyCaptureStatus || "").includes("failed")) failed++;
+      const marker = `${row.id || row.url || index}:${row.status || row.bodyCaptureStatus || ""}:${row.size || row.bodyCapturedBytes || 0}`;
+      if (head.length < 3) head.push(marker);
+      if (tail.length === 3) tail.shift();
+      tail.push(marker);
+    }
+    return [rows.length, totalSize, totalCapturedBytes, visible, metadataOnly, failed, head.join(","), tail.join(",")].join(":");
+  }
+
+
+  let lastPlanCacheKey = "";
+  let lastModuleRenderKey = "";
+  let lastPlanCacheValue = null;
+
+  function exportPlanCacheKey() {
+    const state = controller?.state || {};
+    const optionsJson = JSON.stringify(state.export?.options || {});
+    return [
+      state.target?.analyzedUrl || state.target?.currentUrl || "",
+      summarizeRowsForCache(state.sources?.resources || []),
+      summarizeRowsForCache(state.network?.entries || []),
+      state.cookies?.observedCookies?.length || 0,
+      state.application?.summary?.totalInventoryItems || state.application?.summary?.storageItems || 0,
+      optionsJson
+    ].join("|");
+  }
+
+  function getCachedExportPlan() {
+    const key = exportPlanCacheKey();
+    if (key === lastPlanCacheKey && lastPlanCacheValue) {
+      return lastPlanCacheValue;
+    }
+    lastPlanCacheKey = key;
+    lastPlanCacheValue = buildExportPlan();
+    return lastPlanCacheValue;
+  }
+
+  function moduleRenderKey(snapshot) {
+    const state = controller?.state || {};
+    return [
+      snapshot?.analysis?.status || "",
+      Boolean(snapshot?.analysis?.running),
+      state.target?.analyzedUrl || state.target?.currentUrl || "",
+      state.sources?.resources?.length || 0,
+      state.network?.entries?.length || 0,
+      state.cookies?.observedCookies?.length || 0,
+      state.application?.summary?.totalInventoryItems || state.application?.summary?.storageItems || 0,
+      exportPlanCacheKey(),
+      state.export?.ui?.groupBy || "",
+      state.export?.ui?.filterText || "",
+      JSON.stringify(state.export?.ui?.expandedPaths || [])
+    ].join("|");
+  }
+
   function summarizeRawCookieScope() {
     return typeof domain.summarizeRawCookieScope === "function"
       ? domain.summarizeRawCookieScope(controller?.state?.cookies?.observedCookies || [])
@@ -280,15 +349,21 @@
       ...(controller.state.preferences || {}),
       theme: themeLabel(document.documentElement.dataset.theme || "system")
     };
-    controller.state.export.lastPlan = buildExportPlan();
+    controller.state.export.lastPlan = getCachedExportPlan();
 
+    const nextModuleRenderKey = moduleRenderKey(snapshot);
     const moduleContent = q("moduleContent");
-    if (moduleContent && typeof exportUi.renderExportModule === "function") {
+    if (
+      moduleContent &&
+      typeof exportUi.renderExportModule === "function" &&
+      nextModuleRenderKey !== lastModuleRenderKey
+    ) {
       moduleContent.innerHTML = exportUi.renderExportModule(controller.state, controller.state.export.lastPlan);
+      lastModuleRenderKey = nextModuleRenderKey;
+      bindRenderedEvents();
     }
 
     syncHeader(snapshot);
-    bindRenderedEvents();
   }
 
 
@@ -377,7 +452,7 @@
         anchor.click();
         anchor.remove();
       } finally {
-        URL.revokeObjectURL(blobUrl);
+        window.setTimeout(() => URL.revokeObjectURL(blobUrl), 30_000);
       }
 
       controller.state.export.lastPlan = plan;

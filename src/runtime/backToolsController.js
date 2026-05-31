@@ -127,6 +127,52 @@
     return JSON.parse(JSON.stringify(value));
   }
 
+  function createFrozenExportState(state) {
+    return {
+      ...state,
+      target: {
+        ...(state.target || {})
+      },
+      analysis: {
+        ...(state.analysis || {})
+      },
+      capture: {
+        ...(state.capture || {})
+      },
+      export: {
+        ...(state.export || {}),
+        options: {
+          ...(state.export?.options || {})
+        }
+      },
+      network: {
+        ...(state.network || {}),
+        policy: {
+          ...(state.network?.policy || {})
+        },
+        entries: Array.isArray(state.network?.entries) ? state.network.entries : []
+      },
+      sources: {
+        ...(state.sources || {}),
+        resources: Array.isArray(state.sources?.resources) ? state.sources.resources : []
+      },
+      cookies: {
+        ...(state.cookies || {}),
+        summary: { ...(state.cookies?.summary || {}) },
+        findings: Array.isArray(state.cookies?.findings) ? state.cookies.findings : [],
+        observedCookies: Array.isArray(state.cookies?.observedCookies) ? state.cookies.observedCookies : [],
+        rawRecords: Array.isArray(state.cookies?.rawRecords) ? state.cookies.rawRecords : []
+      },
+      application: state.application || {},
+      diagnostics: {
+        ...(state.diagnostics || {}),
+        logs: Array.isArray(state.diagnostics?.logs) ? state.diagnostics.logs : [],
+        reasonGroups: { ...(state.diagnostics?.reasonGroups || {}) }
+      }
+    };
+  }
+
+
   function browserLabel(runtimeRoot) {
     const userAgent = safeString(runtimeRoot && runtimeRoot.navigator && runtimeRoot.navigator.userAgent);
     const edgeMatch = /Edg\/(\d+[.\d]*)/.exec(userAgent);
@@ -997,17 +1043,67 @@ function createBackToolsController(options = {}) {
       emit();
     }
 
+    function exportSnapshotView() {
+      return {
+        running: Boolean(state.export.running),
+        phase: state.export.phase || null,
+        startedAt: state.export.startedAt || null,
+        finishedAt: state.export.finishedAt || null,
+        lastError: state.export.lastError || null,
+        progress: state.export.progress || { current: 0, total: 0, label: "" }
+      };
+    }
+
+    function emitExportProgressSnapshot() {
+      lastSnapshot = {
+        ...(lastSnapshot || {}),
+        updatedAt: new Date().toISOString(),
+        export: exportSnapshotView(),
+        exportReadiness: state.export.running
+          ? {
+              blocked: true,
+              safeReady: false,
+              limitedReport: Boolean(lastSnapshot?.target?.isLimitedTarget),
+              reason: "Export is running."
+            }
+          : {
+              ...(lastSnapshot?.exportReadiness || {}),
+              blocked: Boolean(lastSnapshot?.analysis?.running),
+              safeReady: !lastSnapshot?.analysis?.running && !lastSnapshot?.target?.isOutOfSync,
+              limitedReport: Boolean(lastSnapshot?.target?.isLimitedTarget),
+              reason: lastSnapshot?.target?.isOutOfSync
+                ? "Target changed since the last analysis."
+                : lastSnapshot?.analysis?.running
+                  ? "Analysis is running."
+                  : "Safe export is ready."
+            }
+      };
+      listeners.forEach((listener) => {
+        try {
+          listener(lastSnapshot);
+        } catch (_error) {}
+      });
+      return lastSnapshot;
+    }
+
     function updateExportState(patch = {}, shouldEmit = true) {
+      const previous = state.export || {};
       state.export = {
-        ...state.export,
+        ...previous,
         ...patch,
         progress: {
-          ...(state.export.progress || { current: 0, total: 0, label: "" }),
+          ...(previous.progress || { current: 0, total: 0, label: "" }),
           ...(patch.progress || {})
         }
       };
       if (shouldEmit) {
-        emit();
+        const patchKeys = Object.keys(patch || {});
+        const progressOnly = patchKeys.length > 0 && patchKeys.every((key) => key === "phase" || key === "progress");
+        if (progressOnly && lastSnapshot) {
+          emitExportProgressSnapshot();
+        } else {
+          emit();
+        }
       }
       return state.export;
     }
@@ -1400,7 +1496,7 @@ function createBackToolsController(options = {}) {
           }
         });
         await stopActiveNetworkCapture("frozen_for_export");
-        const frozenState = clone(state);
+        const frozenState = createFrozenExportState(state);
         frozenState.export = {
           ...frozenState.export,
           running: false,
