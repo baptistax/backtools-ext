@@ -6,6 +6,20 @@ Repository: https://github.com/baptistax/backtools-ext
 
 Public v1 is intentionally simple: run a scan, export the default ZIP, and optionally include a raw cookie dump when you explicitly need it.
 
+
+**
+
+BackTools is a Chrome DevTools extension that exports a structured capture package from the current website.
+
+It collects useful source files, network response bodies, cookies, application storage metadata, and related reports into a readable ZIP for debugging, investigation, or technical review.
+
+<img width="1885" height="1112" alt="image" src="https://github.com/user-attachments/assets/75972f85-befc-428c-8da0-4b34e7961d68" />
+
+
+
+**
+
+
 ## Install locally
 
 1. Open `chrome://extensions`.
@@ -41,24 +55,24 @@ The only optional raw export in public v1 is **Include raw cookie dump**.
 ## Where to look in the ZIP
 
 Start with these files:
-
-| Looking for | Open this | What to search for |
-| --- | --- | --- |
-| Quick overview | `CAPTURE_SUMMARY.md` | exported counts, skipped counts, capture notes |
-| Why something did or did not export | `MANIFEST.json` | `reasonGroups`, `skippedResources`, `bodyPath`, `sourcePath` |
-| Full manifest details | `MANIFEST_DETAILS.json` | larger resource/detail lists |
-| Network requests and bodies | `NETWORK_REPORT.json` | `urlRedacted`, `mimeType`, `statusCode`, `bodyCaptureStatus`, `bodyPath` |
-| Verbose network metadata | `network/NETWORK_DETAILS.json` | headers/status/detail fields |
-| Exported response bodies | `network/...` | actual HTML/JS/CSS/JSON/text files |
-| Exported Sources files | `sources/...` | source files exposed by DevTools |
-| Cookie summary and findings | `cookies/COOKIES_REPORT.json` | `name`, `domain`, `flags`, `risk`, `sourceUrlCount` |
-| Sanitized cookie inventory | `cookies/cookies.sanitized.json` | masked values, length, fingerprint |
-| Raw cookie dump, if enabled | `cookies/cookies.raw.json` | unmasked cookie values |
-| Application overview | `application/APPLICATION_REPORT.json` | storage counts, sample keys, inventories |
-| Sanitized Web Storage records | `application/storage.sanitized.json` | `id`, `kind`, `storageType`, `key`, `classification`, `value` |
-| IndexedDB inventory | `application/indexeddb.inventory.json` | database and object store names |
-| Cache Storage inventory | `application/cache-storage.inventory.json` | cache names and request metadata |
-
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
+| Looking for                         |                Open this                    | What to search for                                                         |
+|                    ---              |                   ---                       |                        ---                                                 |
+| Quick overview                      | `CAPTURE_SUMMARY.md`                        | exported counts,  skipped counts,  capture notes                           |
+| Why something did or did not export | `MANIFEST.json`                             | `reasonGroups`,  `skippedResources`,  `bodyPath`,  `sourcePath`            |
+| Full manifest details               | `MANIFEST_DETAILS.json`                     | larger resource/detail lists                                               |
+| Network requests and bodies         | `NETWORK_REPORT.json`                       | `urlRedacted`,  `mimeType`,  `statusCode`,  `bodyCaptureStatus`,  `bodyPath|
+| Verbose network metadata            | `network/NETWORK_DETAILS.json`              | headers/status/detail fields                                               |
+| Exported response bodies            | `network/...`                               | actual HTML/JS/CSS/JSON/text files                                         |
+| Exported Sources files              | `sources/...`                               | source files exposed by DevTools                                           |
+| Cookie summary and findings         | `cookies/COOKIES_REPORT.json`               | `name`,  `domain`,  `flags`,  `risk`,  `sourceUrlCount`                    |
+| Sanitized cookie inventory          | `cookies/cookies.sanitized.json`            | masked values,  length,  fingerprint                                       |
+| Raw cookie dump, if enabled         | `cookies/cookies.raw.json`                  | unmasked cookie values                                                     |
+| Application overview                | `application/APPLICATION_REPORT.json`       | storage counts,  sample keys,  inventories                                 |
+| Sanitized Web Storage records       | `application/storage.sanitized.json`        | `id`,  `kind`,  `storageType`,  `key`,  `classification`,  `value`         |
+| IndexedDB inventory                 | `application/indexeddb.inventory.json`      | database and object store names                                            |
+| Cache Storage inventory             | `application/cache-storage.inventory.json`  | cache names and request metadata                                           |
+------------------------------------------------------------------------------------------------------------------------------------------------------------------
 Example fields that help when debugging storage variables:
 
 ```json
@@ -122,15 +136,6 @@ Raw cookie dumps can contain session secrets. Keep them private.
 - BackTools does not use CDP, `chrome.debugger`, Fetch interception, runtime injection, a backend service, or the browser cookie store.
 - Full IndexedDB record dumps and full Cache Storage response body dumps are out of scope for public v1.
 
-## Development
-
-No build step is required.
-
-```bash
-npm run check
-```
-
-The public release ZIP does not include the internal test suite.
 
 ## License
 
